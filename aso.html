@@ -1,0 +1,128 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ASO Tool — Frontend</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    body{font-family:Arial, Helvetica, sans-serif; padding:18px; background:#f6f8ff; color:#222}
+    .card{background:#fff;padding:16px;border-radius:10px;box-shadow:0 6px 20px rgba(15,15,30,0.05);margin-bottom:12px}
+    input,select{padding:8px;border:1px solid #e3e6f0;border-radius:8px;width:100%}
+    button{padding:10px 14px;border-radius:8px;background:#5563ee;color:#fff;border:0;cursor:pointer}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px;border-bottom:1px solid #f0f2ff;text-align:left}
+    .muted{color:#6b7280;font-size:13px}
+    .tag{display:inline-block;background:#eef2ff;padding:6px 8px;border-radius:999px;margin:3px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>ASO Analyzer</h2>
+    <p class="muted">Enter a seed keyword and analyze Play Store competitors + SEO keyword suggestions.</p>
+
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <div style="flex:1;min-width:220px">
+        <label>Keyword</label>
+        <input id="kw" placeholder="e.g. photo editor" />
+      </div>
+
+      <div style="width:140px">
+        <label>Country</label>
+        <select id="country"><option value="us">US</option><option value="in" selected>IN</option><option value="gb">UK</option></select>
+      </div>
+
+      <div style="width:120px">
+        <label>Limit</label>
+        <select id="limit"><option>10</option><option selected>20</option><option>30</option></select>
+      </div>
+
+      <div style="width:160px;align-self:end">
+        <button id="analyze">Analyze</button>
+      </div>
+    </div>
+
+    <div style="margin-top:12px" id="suggestWrap"></div>
+    <div id="status" class="muted" style="margin-top:8px"></div>
+  </div>
+
+  <div id="out" style="display:none">
+    <div class="card" id="summaryCard"></div>
+
+    <div class="card">
+      <h3>Competitors</h3>
+      <div id="competitors"></div>
+    </div>
+
+    <div class="card">
+      <h3>Suggested Keywords</h3>
+      <div id="suggestions"></div>
+    </div>
+  </div>
+
+<script>
+const API_BASE = ''; // blank -> same origin; if backend at different origin use 'http://localhost:5173'
+const kwInput = document.getElementById('kw');
+const analyzeBtn = document.getElementById('analyze');
+const status = document.getElementById('status');
+const suggestWrap = document.getElementById('suggestWrap');
+const out = document.getElementById('out');
+const summaryCard = document.getElementById('summaryCard');
+const competitorsDiv = document.getElementById('competitors');
+const suggestionsDiv = document.getElementById('suggestions');
+
+async function fetchJSON(path){
+  const resp = await fetch((API_BASE||'') + path);
+  if (!resp.ok) throw new Error('Network error: ' + resp.status);
+  return resp.json();
+}
+
+analyzeBtn.addEventListener('click', async () => {
+  const kw = kwInput.value.trim();
+  if (!kw) return alert('Enter keyword');
+  const country = document.getElementById('country').value;
+  const limit = document.getElementById('limit').value;
+
+  out.style.display = 'none';
+  status.textContent = 'Fetching suggestions...';
+  suggestWrap.innerHTML = '';
+  try {
+    const sug = await fetchJSON(`/api/suggest?q=${encodeURIComponent(kw)}`);
+    if (sug && sug.suggestions && sug.suggestions.length) {
+      suggestWrap.innerHTML = '<div class="muted">Top suggestions:</div><div style="margin-top:6px">' + sug.suggestions.slice(0,8).map(s=>`<span class="tag">${s}</span>`).join('') + '</div>';
+    }
+  } catch(e) {
+    console.warn('suggest fail', e);
+  }
+
+  status.textContent = 'Analyzing Play Store — this can take 20–60s depending on limit and network...';
+  try {
+    const json = await fetchJSON(`/api/analyze?keyword=${encodeURIComponent(kw)}&country=${encodeURIComponent(country)}&limit=${encodeURIComponent(limit)}`);
+    status.textContent = 'Done.';
+    out.style.display = 'block';
+
+    summaryCard.innerHTML = `<strong>Keyword:</strong> ${json.keyword} &nbsp; · &nbsp; <strong>Found:</strong> ${json.topCount} apps &nbsp; · &nbsp; <strong>Avg installs:</strong> ${json.avgInstalls}`;
+
+    // competitors table
+    if (json.competitors && json.competitors.length) {
+      const rows = json.competitors.map(c=>`<tr><td>#${c.rank}</td><td>${escapeHtml(c.title)}</td><td><code>${c.package}</code></td><td>${c.rating||'—'}</td><td>${c.installs||'—'}</td></tr>`).join('');
+      competitorsDiv.innerHTML = `<table><thead><tr><th>Rank</th><th>App</th><th>Package</th><th>Rating</th><th>Installs</th></tr></thead><tbody>${rows}</tbody></table>`;
+    } else competitorsDiv.innerHTML = '<div class="muted">No competitors returned</div>';
+
+    // suggestions
+    if (json.suggestions && json.suggestions.length) {
+      suggestionsDiv.innerHTML = '<table><thead><tr><th>Keyword</th><th>Score</th><th>Difficulty (est)</th></tr></thead><tbody>' +
+        json.suggestions.slice(0,80).map(s => `<tr><td>${escapeHtml(s.keyword)}</td><td>${s.score}</td><td>${s.difficulty}</td></tr>`).join('') +
+        '</tbody></table>';
+    } else suggestionsDiv.innerHTML = '<div class="muted">No keyword suggestions</div>';
+
+  } catch (err) {
+    console.error(err);
+    status.textContent = 'Analysis failed: ' + (err.message || err);
+    alert('Analysis failed — check server logs and try again.');
+  }
+});
+
+function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
+</script>
+</body>
+</html>
